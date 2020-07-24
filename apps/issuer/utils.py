@@ -1,12 +1,10 @@
-from __future__ import unicode_literals
 import aniso8601
 import hashlib
 import pytz
 import re
+from urllib.parse import urlparse, urlunparse
 
-from django.apps import apps
-from django.conf import settings
-from django.core.urlresolvers import resolve, Resolver404
+from django.urls import resolve, Resolver404
 from django.utils import timezone
 
 from mainsite.utils import OriginSetting
@@ -45,13 +43,19 @@ def add_obi_version_ifneeded(url, obi_version):
 
 def generate_sha256_hashstring(identifier, salt=None):
     key = '{}{}'.format(identifier, salt if salt is not None else "")
-    return 'sha256$' + hashlib.sha256(key).hexdigest()
+    return 'sha256$' + hashlib.sha256(key.encode('utf-8')).hexdigest()
 
 
 def generate_md5_hashstring(identifier, salt=None):
     key = '{}{}'.format(identifier, salt if salt is not None else "")
-    return 'md5$' + hashlib.md5(key).hexdigest()
+    return 'md5$' + hashlib.md5(key.encode('utf-8')).hexdigest()
 
+
+def generate_rebaked_filename(oldname):
+    parts = oldname.split('.')
+    ext = parts.pop()
+    parts.append('rebaked')
+    return 'assertion-{}.{}'.format(hashlib.md5(''.join(parts).encode('utf-8')).hexdigest(), ext)
 
 def is_probable_url(string):
     earl = re.compile(r'^https?')
@@ -141,3 +145,19 @@ def request_authenticated_with_server_admin_token(request):
         return 'rw:serverAdmin' in set(request.auth.scope.split())
     except AttributeError:
         return False
+
+
+def sanitize_id(recipient_identifier, identifier_type, allow_uppercase=False):
+    if identifier_type == 'email':
+        return recipient_identifier if allow_uppercase else recipient_identifier.lower()
+    elif identifier_type == 'url':
+        p = urlparse(recipient_identifier)
+        return urlunparse((
+            p.scheme,
+            p.netloc.lower(),
+            p.path,
+            p.params,
+            p.query,
+            p.fragment,
+        ))
+    return recipient_identifier

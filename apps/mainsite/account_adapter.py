@@ -1,6 +1,6 @@
 import logging
-import urllib
-import urlparse
+import urllib.request, urllib.parse, urllib.error
+import urllib.parse
 
 from allauth.account.adapter import DefaultAccountAdapter, get_adapter
 from allauth.account.models import EmailConfirmation, EmailConfirmationHMAC
@@ -9,13 +9,16 @@ from allauth.exceptions import ImmediateHttpResponse
 from django.conf import settings
 from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sites.shortcuts import get_current_site
-from django.core.urlresolvers import resolve, Resolver404, reverse
+from django.urls import resolve, Resolver404, reverse
 
 from badgeuser.authcode import authcode_for_accesstoken
 from badgeuser.models import CachedEmailAddress
+import badgrlog
 from badgrsocialauth.utils import set_session_badgr_app
 from mainsite.models import BadgrApp, EmailBlacklist, AccessTokenProxy
 from mainsite.utils import OriginSetting, set_url_query_params
+
+logger = badgrlog.BadgrLogger()
 
 
 class BadgrAccountAdapter(DefaultAccountAdapter):
@@ -43,13 +46,20 @@ class BadgrAccountAdapter(DefaultAccountAdapter):
         self.EMAIL_FROM_STRING = self.set_email_string(context)
 
         msg = self.render_mail(template_prefix, email, context)
+        logger.event(badgrlog.EmailRendered(msg))
         msg.send()
 
     def set_email_string(self, context):
-        from_elements = [context.get('site_name', '')]
+        # site_name should not contain commas.
+        from_elements = [context.get('site_name', 'Badgr').replace(',', '')]
 
-        default_from = getattr(settings, 'DEFAULT_FROM_EMAIL', None)
-        if default_from:
+        # DEFAULT_FROM_EMAIL must not already have < > in it.
+        default_from = getattr(settings, 'DEFAULT_FROM_EMAIL', '')
+        if not default_from:
+            raise NotImplementedError("DEFAULT_FROM_EMAIL setting must be defined.")
+        elif '<' in default_from:
+            return default_from
+        else:
             from_elements.append("<{}>".format(default_from))
 
         return " ".join(from_elements)
@@ -91,12 +101,13 @@ class BadgrAccountAdapter(DefaultAccountAdapter):
                 query_params['signup'] = 'true'
                 return set_url_query_params(badgr_app.get_path('/auth/welcome'), **query_params)
             else:
-                return set_url_query_params(urlparse.urljoin(
+                return set_url_query_params(urllib.parse.urljoin(
                     badgr_app.email_confirmation_redirect.rstrip('/') + '/',
-                    urllib.quote(email_address.user.first_name.encode('utf8'))
+                    urllib.parse.quote(email_address.user.first_name.encode('utf8'))
                 ), **query_params)
 
-        except Resolver404, EmailConfirmation.DoesNotExist:
+        except Resolver404 as xxx_todo_changeme:
+            EmailConfirmation.DoesNotExist = xxx_todo_changeme
             return badgr_app.email_confirmation_redirect
 
     def get_email_confirmation_url(self, request, emailconfirmation, signup=False):
@@ -155,7 +166,7 @@ class BadgrAccountAdapter(DefaultAccountAdapter):
         """
         If successfully logged in, redirect to the front-end, including an authToken query parameter.
         """
-        if request.user.is_authenticated():
+        if request.user.is_authenticated:
             badgr_app = BadgrApp.objects.get_current(self.request)
 
             if badgr_app is not None:

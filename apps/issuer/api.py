@@ -233,9 +233,12 @@ class BadgeClassDetail(BaseEntityDetailView):
         ])
     )
     def delete(self, request, **kwargs):
-        # TODO: log delete methods
-        # logger.event(badgrlog.BadgeClassDeletedEvent(old_badgeclass, request.user))
-        return super(BadgeClassDetail, self).delete(request, **kwargs)
+        base_entity = super(BadgeClassDetail, self)
+        badge_class = base_entity.get_object(request, **kwargs)
+
+        logger.event(badgrlog.BadgeClassDeletedEvent(badge_class, request.user))
+
+        return base_entity.delete(request, **kwargs)
 
     @apispec_put_operation('BadgeClass',
         summary='Update an existing BadgeClass.  Previously issued BadgeInstances will NOT be updated',
@@ -297,7 +300,7 @@ class BatchAssertionsIssue(VersionedObjectMixin, BaseEntityView):
         def _include_create_notification(a):
             a['create_notification'] = create_notification
             return a
-        assertions = map(_include_create_notification, request.data.get('assertions'))
+        assertions = list(map(_include_create_notification, request.data.get('assertions')))
 
         # save serializers
         context = self.get_context_data(**kwargs)
@@ -358,7 +361,7 @@ class BatchAssertionsRevoke(VersionedObjectMixin, BaseEntityView):
         try:
             assertion.revoke(revocation_reason)
         except Exception as e:
-            return dict(response, reason=e.message)
+            return dict(response, reason=str(e))
 
         return dict(response, revoked=True)
 
@@ -406,13 +409,15 @@ class BadgeInstanceList(UncachedPaginatedViewMixin, VersionedObjectMixin, BaseEn
 
     def get_queryset(self, request=None, **kwargs):
         badgeclass = self.get_object(request, **kwargs)
-        queryset = BadgeInstance.objects.filter(
-            badgeclass=badgeclass,
-            revoked=False
-        )
+        queryset = BadgeInstance.objects.filter(badgeclass=badgeclass)
         recipients = request.query_params.getlist('recipient', None)
         if recipients:
             queryset = queryset.filter(recipient_identifier__in=recipients)
+        if request.query_params.get('include_expired', '').lower() not in ['1', 'true']:
+            queryset = queryset.filter(
+                Q(expires_at__gte=datetime.datetime.now()) | Q(expires_at__isnull=True))
+        if request.query_params.get('include_revoked', '').lower() not in ['1', 'true']:
+            queryset = queryset.filter(revoked=False)
 
         return queryset
 
@@ -436,6 +441,18 @@ class BadgeInstanceList(UncachedPaginatedViewMixin, VersionedObjectMixin, BaseEn
                 'name': "num",
                 'type': "string",
                 'description': 'Request pagination of results'
+            },
+            {
+                'in': 'query',
+                'name': "include_expired",
+                'type': "boolean",
+                'description': 'Include expired assertions'
+            },
+            {
+                'in': 'query',
+                'name': "include_revoked",
+                'type': "boolean",
+                'description': 'Include revoked assertions'
             }
         ]
     )
@@ -587,7 +604,7 @@ class BadgeInstanceDetail(BaseEntityDetailView):
 
         serializer = self.get_serializer_class()(assertion, context={'request': request})
 
-        # logger.event(badgrlog.BadgeAssertionRevokedEvent(current_assertion, request.user))
+        logger.event(badgrlog.BadgeAssertionRevokedEvent(assertion, request.user))
         return Response(status=HTTP_200_OK, data=serializer.data)
 
     @apispec_put_operation('Assertion',
@@ -679,14 +696,14 @@ class PaginatedAssertionsSinceSerializer(CursorPaginatedListSerializer):
 
 class AssertionsChangedSince(BaseEntityView):
     permission_classes = (BadgrOAuthTokenHasScope,)
-    valid_scopes = ["r:assertions", "rw:serverAdmin"]
+    valid_scopes = ["r:issuer", "rw:issuer", "rw:serverAdmin"]
 
     def get_queryset(self, request, since=None):
         user = request.user
 
-        expr = Q(user__oauth2_provider_accesstoken__application__user=user)
-        expr &= Q(user__oauth2_provider_accesstoken__accesstokenscope__scope__in=["r:backpack", "rw:backpack"])
-        expr |= Q(issuer__issuerstaff__user=user)
+        # for efficiency, this is updated to no longer return assertions linked to applications
+        # this will just fetch assertions for issuers that the user is a staff member for
+        expr = Q(issuer__issuerstaff__user=user)
 
         if since is not None:
             expr &= Q(updated_at__gt=since)
@@ -733,7 +750,7 @@ class PaginatedBadgeClassesSinceSerializer(CursorPaginatedListSerializer):
 
 class BadgeClassesChangedSince(BaseEntityView):
     permission_classes = (BadgrOAuthTokenHasScope,)
-    valid_scopes = ["r:issuer", "rw:serverAdmin"]
+    valid_scopes = ["r:issuer", "rw:issuer", "rw:serverAdmin"]
 
     def get_queryset(self, request, since=None):
         user = request.user
@@ -785,7 +802,7 @@ class PaginatedIssuersSinceSerializer(CursorPaginatedListSerializer):
 
 class IssuersChangedSince(BaseEntityView):
     permission_classes = (BadgrOAuthTokenHasScope,)
-    valid_scopes = ["r:issuer", "rw:serverAdmin"]
+    valid_scopes = ["r:issuer", "rw:issuer", "rw:serverAdmin"]
 
     def get_queryset(self, request, since=None):
         user = request.user

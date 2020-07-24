@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 from collections import OrderedDict
 
@@ -40,6 +40,113 @@ class BackpackAssertionSerializerV2(DetailSerializerV2, OriginalJsonSerializerMi
 
     class Meta(DetailSerializerV2.Meta):
         model = BadgeInstance
+        apispec_definition = ('BackpackAssertion', {
+            'properties': OrderedDict([
+                ('entityId', {
+                    'type': "string",
+                    'format': "string",
+                    'description': "Unique identifier for this Issuer",
+                    'readOnly': True,
+                }),
+                ('entityType', {
+                    'type': "string",
+                    'format': "string",
+                    'description': "\"Issuer\"",
+                    'readOnly': True,
+                }),
+                ('openBadgeId', {
+                    'type': "string",
+                    'format': "url",
+                    'description': "URL of the OpenBadge compliant json",
+                    'readOnly': True,
+                }),
+                ('badgeclass', {
+                    'type': 'string',
+                    'format': 'entityId',
+                    'description': "BadgeClass that issued this Assertion",
+                    'required': False,
+                }),
+                ('badgeclassOpenBadgeId', {
+                    'type': 'string',
+                    'format': 'url',
+                    'description': "URL of the BadgeClass to award",
+                    'readOnly': True,
+                }),
+                ('image', {
+                    'type': 'string',
+                    'format': 'url',
+                    'description': "URL to the baked assertion image",
+                    'readOnly': True,
+                }),
+                ('recipient', {
+                    'type': 'object',
+                    'properties': OrderedDict([
+                        ('identity', {
+                            'type': 'string',
+                            'format': 'string',
+                            'description': 'Either the hash of the identity or the plaintext value',
+                            'required': True,
+                        }),
+                        ('type', {
+                            'type': 'string',
+                            'enum': [c[0] for c in BadgeInstance.RECIPIENT_TYPE_CHOICES],
+                            'description': "Type of identifier used to identify recipient",
+                            'required': False,
+                        }),
+                        ('hashed', {
+                            'type': 'boolean',
+                            'description': "Whether or not the identity value is hashed.",
+                            'required': False,
+                        }),
+                        ('plaintextIdentity', {
+                            'type': 'string',
+                            'description': "The plaintext identity",
+                            'required': False,
+                        }),
+                    ]),
+                    'description': "Recipient that was issued the Assertion",
+                    'required': True,
+                }),
+                ('issuedOn', {
+                    'type': 'string',
+                    'format': 'ISO8601 timestamp',
+                    'description': "Timestamp when the Assertion was issued",
+                    'required': True,
+                }),
+                ('narrative', {
+                    'type': 'string',
+                    'format': 'markdown',
+                    'description': "Markdown narrative of the achievement",
+                    'required': False,
+                }),
+                ('evidence', {
+                    'type': 'array',
+                    'items': {
+                        '$ref': '#/definitions/AssertionEvidence'
+                    },
+                    'description': "List of evidence associated with the achievement",
+                    'required': False,
+                }),
+                ('revoked', {
+                    'type': 'boolean',
+                    'description': "True if this Assertion has been revoked",
+                    'readOnly': True,
+                }),
+                ('revocationReason', {
+                    'type': 'string',
+                    'format': "string",
+                    'description': "Short description of why the Assertion was revoked",
+                    'readOnly': True,
+                }),
+                ('expires', {
+                    'type': 'string',
+                    'format': 'ISO8601 timestamp',
+                    'description': "Timestamp when the Assertion expires",
+                    'required': False,
+                }),
+
+            ])
+        })
 
     def to_representation(self, instance):
         representation = super(BackpackAssertionSerializerV2, self).to_representation(instance)
@@ -151,7 +258,7 @@ class BackpackImportSerializerV2(DetailSerializerV2):
 
     def validate(self, attrs):
         # TODO: when test is run, why is assertion field blank???
-        if sum(1 if v else 0 for v in attrs.values()) != 1:
+        if sum(1 if v else 0 for v in list(attrs.values())) != 1:
             raise serializers.ValidationError("Must provide only one of 'url', 'image' or 'assertion'.")
         return attrs
 

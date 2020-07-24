@@ -1,8 +1,8 @@
 import datetime
 import json
 import re
-import urllib
-import urlparse
+import urllib.request, urllib.parse, urllib.error
+import urllib.parse
 
 from allauth.account.adapter import get_adapter
 from allauth.account.models import EmailConfirmationHMAC
@@ -16,7 +16,7 @@ from django.contrib.auth.tokens import default_token_generator
 from django.contrib.sites.shortcuts import get_current_site
 from django.core.cache import cache
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.http import Http404
 from django.utils import timezone
 from django.views.generic import RedirectView
@@ -112,7 +112,7 @@ class BadgeUserDetail(BaseEntityDetailView):
             else:
                 return self.object
         elif version == 'v1':
-            if request.user.is_authenticated():
+            if request.user.is_authenticated:
                 self.object = request.user
                 return self.object
         raise Http404
@@ -510,9 +510,9 @@ class BadgeUserAccountConfirm(RedirectView):
             user.set_password(user_info['plaintext_password'])
         user.save()
 
-        redirect_url = urlparse.urljoin(
+        redirect_url = urllib.parse.urljoin(
             self.badgrapp.email_confirmation_redirect.rstrip('/') + '/',
-            urllib.quote(user.first_name.encode('utf8'))
+            urllib.parse.quote(user.first_name.encode('utf8'))
         )
         redirect_url = set_url_query_params(redirect_url, email=email_address.email.encode('utf8'))
         return redirect_url

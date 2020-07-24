@@ -1,7 +1,7 @@
-from __future__ import unicode_literals
+
 
 from django.contrib.admin import ModelAdmin, StackedInline, TabularInline
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.http import HttpResponseRedirect
 
 from django_object_actions import DjangoObjectActions
@@ -25,14 +25,14 @@ class IssuerExtensionInline(TabularInline):
 
 
 class IssuerAdmin(DjangoObjectActions, ModelAdmin):
-    readonly_fields = ('created_at', 'created_by', 'old_json', 'source', 'source_url', 'entity_id', 'slug')
+    readonly_fields = ('created_by', 'created_at', 'updated_at', 'old_json', 'source', 'source_url', 'entity_id', 'slug')
     list_display = ('img', 'name', 'entity_id', 'created_by', 'created_at')
     list_display_links = ('img', 'name')
     list_filter = ('created_at',)
     search_fields = ('name', 'entity_id')
     fieldsets = (
         ('Metadata', {
-            'fields': ('created_by', 'created_at', 'source', 'source_url', 'entity_id', 'slug'),
+            'fields': ('created_by', 'created_at', 'updated_at', 'source', 'source_url', 'entity_id', 'slug'),
             'classes': ("collapse",)
         }),
         (None, {
@@ -50,7 +50,7 @@ class IssuerAdmin(DjangoObjectActions, ModelAdmin):
 
     def img(self, obj):
         try:
-            return u'<img src="{}" width="32"/>'.format(obj.image.url)
+            return '<img src="{}" width="32"/>'.format(obj.image.url)
         except ValueError:
             return obj.image
     img.short_description = 'Image'
@@ -85,7 +85,7 @@ class BadgeClassExtensionInline(TabularInline):
 
 
 class BadgeClassAdmin(DjangoObjectActions, ModelAdmin):
-    readonly_fields = ('created_at', 'created_by', 'old_json', 'source', 'source_url', 'entity_id', 'slug')
+    readonly_fields = ('created_by', 'created_at', 'updated_at', 'old_json', 'source', 'source_url', 'entity_id', 'slug')
     list_display = ('badge_image', 'name', 'entity_id', 'issuer_link', 'recipient_count')
     list_display_links = ('badge_image', 'name',)
     list_filter = ('created_at',)
@@ -93,7 +93,7 @@ class BadgeClassAdmin(DjangoObjectActions, ModelAdmin):
     raw_id_fields = ('issuer',)
     fieldsets = (
         ('Metadata', {
-            'fields': ('created_by', 'created_at', 'source', 'source_url', 'entity_id', 'slug'),
+            'fields': ('created_by', 'created_at', 'updated_at', 'source', 'source_url', 'entity_id', 'slug'),
             'classes': ("collapse",)
         }),
         (None, {
@@ -114,7 +114,7 @@ class BadgeClassAdmin(DjangoObjectActions, ModelAdmin):
     change_actions = ['redirect_issuer', 'redirect_instances', 'redirect_pathwaybadges']
 
     def badge_image(self, obj):
-        return u'<img src="{}" width="32"/>'.format(obj.image.url) if obj.image else ''
+        return '<img src="{}" width="32"/>'.format(obj.image.url) if obj.image else ''
     badge_image.short_description = 'Badge'
     badge_image.allow_tags = True
 
@@ -159,7 +159,7 @@ class BadgeInstanceExtensionInline(TabularInline):
 
 
 class BadgeInstanceAdmin(DjangoObjectActions, ModelAdmin):
-    readonly_fields = ('created_at', 'created_by', 'updated_at','updated_by', 'image', 'entity_id', 'old_json', 'salt', 'entity_id', 'slug', 'source', 'source_url')
+    readonly_fields = ('created_at', 'created_by', 'updated_at', 'image', 'entity_id', 'old_json', 'salt', 'entity_id', 'slug', 'source', 'source_url')
     list_display = ('badge_image', 'recipient_identifier', 'entity_id', 'badgeclass', 'issuer')
     list_display_links = ('badge_image', 'recipient_identifier', )
     list_filter = ('created_at',)
@@ -167,7 +167,7 @@ class BadgeInstanceAdmin(DjangoObjectActions, ModelAdmin):
     raw_id_fields = ('badgeclass', 'issuer')
     fieldsets = (
         ('Metadata', {
-            'fields': ('source', 'source_url', 'created_by', 'created_at', 'updated_by','updated_at', 'entity_id', 'slug', 'salt'),
+            'fields': ('source', 'source_url', 'created_by', 'created_at', 'updated_at', 'slug', 'salt'),
             'classes': ("collapse",)
         }),
         ('Badgeclass', {
@@ -197,7 +197,7 @@ class BadgeInstanceAdmin(DjangoObjectActions, ModelAdmin):
 
     def badge_image(self, obj):
         try:
-            return u'<img src="{}" width="32"/>'.format(obj.image.url)
+            return '<img src="{}" width="32"/>'.format(obj.image.url)
         except ValueError:
             return obj.image
     badge_image.short_description = 'Badge'

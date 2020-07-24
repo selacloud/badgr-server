@@ -1,8 +1,9 @@
 from django import http
+from django.utils import deprecation
 from mainsite import settings
 
 
-class MaintenanceMiddleware(object):
+class MaintenanceMiddleware(deprecation.MiddlewareMixin):
     """Serve a temporary redirect to a maintenance url in maintenance mode"""
     def process_request(self, request):
         if request.method == 'POST':
@@ -11,11 +12,11 @@ class MaintenanceMiddleware(object):
             return None
 
 
-class TrailingSlashMiddleware(object):
+class TrailingSlashMiddleware(deprecation.MiddlewareMixin):
     def process_request(self, request):
         """Removes the slash from urls, or adds a slash for the admin urls"""
         exceptions = ['/staff', '/__debug__']
-        if filter(request.path.startswith, exceptions):
+        if list(filter(request.path.startswith, exceptions)):
             if request.path[-1] != '/':
                 return http.HttpResponsePermanentRedirect(request.path+"/")
         else:

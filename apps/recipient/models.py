@@ -2,7 +2,7 @@
 import basic_models
 import cachemodel
 from basic_models.models import CreatedUpdatedAt, IsActive, CreatedUpdatedBy
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db import models, transaction
 
 from entity.models import BaseVersionedEntity
@@ -13,7 +13,8 @@ from pathway.completionspec import CompletionRequirementSpecFactory, ElementJunc
 
 
 class RecipientProfile(BaseVersionedEntity, CreatedUpdatedAt, CreatedUpdatedBy, IsActive):
-    badge_user = models.ForeignKey('badgeuser.BadgeUser', null=True, blank=True)
+    badge_user = models.ForeignKey('badgeuser.BadgeUser', null=True, blank=True,
+                                   on_delete=models.CASCADE)
     recipient_identifier = models.EmailField(max_length=1024)
     public = models.BooleanField(default=False)
     display_name = models.CharField(max_length=254)
@@ -23,19 +24,19 @@ class RecipientProfile(BaseVersionedEntity, CreatedUpdatedAt, CreatedUpdatedBy, 
 
     cached = SlugOrJsonIdCacheModelManager(slug_kwarg_name='entity_id', slug_field_name='entity_id')
 
-    def __unicode__(self):
+    def __str__(self):
         if self.display_name:
             return self.display_name
         return self.recipient_identifier
 
     @property
     def jsonld_id(self):
-        return u'mailto:{}'.format(self.recipient_identifier)
+        return 'mailto:{}'.format(self.recipient_identifier)
 
     def cached_completions(self, pathway):
         # get recipients instances that are aligned to this pathway
         badgeclasses = pathway.cached_badgeclasses()
-        instances = filter(lambda i: not i.revoked and i.cached_badgeclass in badgeclasses, self.cached_badge_instances())
+        instances = [i for i in self.cached_badge_instances() if not i.revoked and i.cached_badgeclass in badgeclasses]
 
         # recurse the tree to build completions
         tree = pathway.element_tree
@@ -46,7 +47,7 @@ class RecipientProfile(BaseVersionedEntity, CreatedUpdatedAt, CreatedUpdatedBy, 
             completion_spec = ElementJunctionCompletionRequirementSpec(
                 junction_type=CompletionRequirementSpecFactory.JUNCTION_TYPE_CONJUNCTION,
                 required_number=len(tree['children']),
-                elements=(c['element'].jsonld_id for c in tree['children'].itervalues()))
+                elements=(c['element'].jsonld_id for c in list(tree['children'].values())))
             tree['element'].completion_requirements = completion_spec.serialize()
 
         if completion_spec.completion_type == CompletionRequirementSpecFactory.BADGE_JUNCTION:
@@ -67,7 +68,8 @@ class RecipientProfile(BaseVersionedEntity, CreatedUpdatedAt, CreatedUpdatedBy, 
 
 
 class RecipientGroup(BaseAuditedModel, BaseVersionedEntity, IsActive):
-    issuer = models.ForeignKey('issuer.Issuer')
+    issuer = models.ForeignKey('issuer.Issuer',
+                               on_delete=models.CASCADE)
     name = models.CharField(max_length=254)
     description = models.TextField(blank=True, null=True)
     members = models.ManyToManyField('RecipientProfile', through='recipient.RecipientGroupMembership')
@@ -78,7 +80,7 @@ class RecipientGroup(BaseAuditedModel, BaseVersionedEntity, IsActive):
 
     cached = SlugOrJsonIdCacheModelManager(slug_kwarg_name='slug', slug_field_name='entity_id')
 
-    def __unicode__(self):
+    def __str__(self):
         return self.name
 
     def publish(self):
@@ -150,8 +152,10 @@ class RecipientGroup(BaseAuditedModel, BaseVersionedEntity, IsActive):
 
 
 class RecipientGroupMembership(BaseVersionedEntity):
-    recipient_profile = models.ForeignKey('recipient.RecipientProfile')
-    recipient_group = models.ForeignKey('recipient.RecipientGroup')
+    recipient_profile = models.ForeignKey('recipient.RecipientProfile',
+                                          on_delete=models.CASCADE)
+    recipient_group = models.ForeignKey('recipient.RecipientGroup',
+                                        on_delete=models.CASCADE)
     membership_name = models.CharField(max_length=254)
 
     # slug has been deprecated for now, but preserve existing values
@@ -159,7 +163,7 @@ class RecipientGroupMembership(BaseVersionedEntity):
 
     @property
     def jsonld_id(self):
-        return u"mailto:{}".format(self.recipient_identifier)
+        return "mailto:{}".format(self.recipient_identifier)
 
     @property
     def cached_recipient_profile(self):

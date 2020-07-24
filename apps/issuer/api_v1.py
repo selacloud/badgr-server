@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 from apispec_drf.decorators import apispec_list_operation, apispec_operation
 from django.contrib.auth import get_user_model
@@ -76,7 +76,11 @@ class IssuerStaffList(VersionedObjectMixin, APIView):
         (AuthenticatedWithVerifiedIdentifier & IsOwnerOrStaff) |
         BadgrOAuthTokenHasEntityScope
     ]
-    valid_scopes = ["rw:issuerOwner:*"]
+    valid_scopes = {
+        "get": ["rw:issuerOwner:*"],
+        "post": ["rw:issuerOwner:*"],
+        "@apispec_scopes": {}
+    }
 
     @apispec_list_operation('IssuerStaff',
         tags=['Issuers'],

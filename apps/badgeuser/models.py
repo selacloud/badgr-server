@@ -1,4 +1,4 @@
-from __future__ import unicode_literals
+
 
 import base64
 import re
@@ -116,7 +116,8 @@ class ProxyEmailConfirmation(EmailConfirmation):
 
 class EmailAddressVariant(models.Model):
     email = models.EmailField(blank=False)
-    canonical_email = models.ForeignKey(CachedEmailAddress, blank=False)
+    canonical_email = models.ForeignKey(CachedEmailAddress, blank=False,
+                                        on_delete=models.CASCADE)
 
     def save(self, *args, **kwargs):
         self.is_valid(raise_exception=True)
@@ -124,7 +125,7 @@ class EmailAddressVariant(models.Model):
         super(EmailAddressVariant, self).save(*args, **kwargs)
         self.canonical_email.save()
 
-    def __unicode__(self):
+    def __str__(self):
         return self.email
 
     @property
@@ -170,7 +171,8 @@ class UserRecipientIdentifier(cachemodel.CacheModel):
     }
     type = models.CharField(max_length=9, choices=IDENTIFIER_TYPE_CHOICES, default=IDENTIFIER_TYPE_URL)
     identifier = models.CharField(max_length=255)
-    user = models.ForeignKey(AUTH_USER_MODEL)
+    user = models.ForeignKey(AUTH_USER_MODEL,
+                             on_delete=models.CASCADE)
     verified = models.BooleanField(default=False)
 
     class Meta:
@@ -206,6 +208,7 @@ class UserRecipientIdentifier(cachemodel.CacheModel):
         self.user.publish()
 
     def delete(self):
+        self.publish_delete('identifier')
         super(UserRecipientIdentifier, self).delete()
         process_post_recipient_id_deletion.delay(self.identifier)
 
@@ -230,12 +233,12 @@ class BadgeUser(BaseVersionedEntity, AbstractUser, cachemodel.CacheModel):
         verbose_name_plural = _('badge users')
         db_table = 'users'
 
-    def __unicode__(self):
+    def __str__(self):
         primary_identifier = self.email or next((e for e in self.all_verified_recipient_identifiers), '')
-        return u"{} ({})".format(self.get_full_name(), primary_identifier)
+        return "{} ({})".format(self.get_full_name(), primary_identifier)
 
     def get_full_name(self):
-        return u"%s %s" % (self.first_name, self.last_name)
+        return "%s %s" % (self.first_name, self.last_name)
 
     def email_user(self, subject, message, from_email=None, **kwargs):
         """
@@ -357,7 +360,7 @@ class BadgeUser(BaseVersionedEntity, AbstractUser, cachemodel.CacheModel):
 
             # remove old items
             for emailaddress in self.email_items:
-                if emailaddress.email not in new_email_idx:
+                if emailaddress.email.lower() not in (lower_case_idx.lower() for lower_case_idx in new_email_idx):
                     emailaddress.delete()
 
         if self.email != requested_primary:
@@ -382,14 +385,14 @@ class BadgeUser(BaseVersionedEntity, AbstractUser, cachemodel.CacheModel):
 
     @property
     def primary_email(self):
-        primaries = filter(lambda e: e.primary, self.cached_emails())
+        primaries = [e for e in self.cached_emails() if e.primary]
         if len(primaries) > 0:
             return primaries[0].email
         return self.email
 
     @property
     def verified_emails(self):
-        return filter(lambda e: e.verified, self.cached_emails())
+        return [e for e in self.cached_emails() if e.verified]
 
     @property
     def verified(self):
@@ -544,7 +547,8 @@ class TermsVersion(IsActive, BaseAuditedModel, cachemodel.CacheModel):
 
 
 class TermsAgreement(BaseAuditedModel, cachemodel.CacheModel):
-    user = models.ForeignKey('badgeuser.BadgeUser')
+    user = models.ForeignKey('badgeuser.BadgeUser',
+                             on_delete=models.CASCADE)
     terms_version = models.PositiveIntegerField()
     agreed = models.BooleanField(default=True)
 

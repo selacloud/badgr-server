@@ -1,7 +1,8 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 import badgrlog
+import datetime
 
 from django.utils import timezone
 from rest_framework import permissions
@@ -43,13 +44,13 @@ class BackpackAssertionList(BaseEntityListView):
     def get_objects(self, request, **kwargs):
         version = kwargs.get('version', 'v1')
         include_expired = request.query_params.get(
-            u'include_expired', self.include_defaults['include_expired'][version]
+            'include_expired', self.include_defaults['include_expired'][version]
         ).lower() in ['1', 'true']
         include_revoked = request.query_params.get(
-            u'include_revoked', self.include_defaults['include_revoked'][version]
+            'include_revoked', self.include_defaults['include_revoked'][version]
         ).lower() in ['1', 'true']
         include_pending = request.query_params.get(
-            u'include_pending', self.include_defaults['include_pending'][version]
+            'include_pending', self.include_defaults['include_pending'][version]
         ).lower() in ['1', 'true']
 
         def badge_filter(b):
@@ -60,7 +61,7 @@ class BackpackAssertionList(BaseEntityListView):
                 return False
             return True
 
-        return filter(badge_filter, self.request.user.cached_badgeinstances())
+        return list(filter(badge_filter, self.request.user.cached_badgeinstances()))
 
     @apispec_list_operation('Assertion',
         summary="Get a list of Assertions in authenticated user's backpack ",
@@ -137,7 +138,7 @@ class BackpackAssertionDetail(BaseEntityDetailView):
         context['format'] = self.request.query_params.get('json_format', 'v1')  # for /v1/earner/badges compat
         return context
 
-    @apispec_get_operation('Assertion',
+    @apispec_get_operation('BackpackAssertion',
                            summary="Get detail on an Assertion in the user's Backpack",
                            tags=['Backpack']
                            )
@@ -153,7 +154,7 @@ class BackpackAssertionDetail(BaseEntityDetailView):
 
         return super(BackpackAssertionDetail, self).get(request, **mykwargs)
 
-    @apispec_delete_operation('Assertion',
+    @apispec_delete_operation('BackpackAssertion',
                               summary='Remove an assertion from the backpack',
                               tags=['Backpack']
                               )
@@ -173,13 +174,13 @@ class BackpackAssertionDetail(BaseEntityDetailView):
         request.user.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    @apispec_put_operation('Assertion',
+    @apispec_put_operation('BackpackAssertion',
                            summary="Update acceptance of an Assertion in the user's Backpack",
                            tags=['Backpack']
                            )
     def put(self, request, **kwargs):
         fields_whitelist = ('acceptance',)
-        data = {k: v for k, v in request.data.items() if k in fields_whitelist}
+        data = {k: v for k, v in list(request.data.items()) if k in fields_whitelist}
 
         obj = self.get_object(request, **kwargs)
         if not self.has_object_permissions(request, obj):
@@ -355,6 +356,7 @@ class ShareBackpackAssertion(BaseEntityDetailView):
             return Response({'error': "invalid share provider"}, status=status.HTTP_400_BAD_REQUEST)
 
         share.save()
+        logger.event(badgrlog.BadgeSharedEvent(badge, provider, datetime.datetime.now(), source))
 
         if redirect:
             headers = {'Location': share_url}

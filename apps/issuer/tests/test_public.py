@@ -1,9 +1,10 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 import io
 import json
-import urllib
+import urllib.request, urllib.parse, urllib.error
+import mock
 
 import responses
 from django.urls import reverse
@@ -195,7 +196,7 @@ class PublicAPITests(SetupIssuerHelper, BadgrTestCase):
         assertion = test_badgeclass.issue(recipient_id='new.recipient@email.test')
 
         for headers in redirect_accepts:
-            with self.assertNumQueries(2):
+            with self.assertNumQueries(1):
                 response = self.client.get('/public/assertions/{}'.format(assertion.entity_id), **headers)
                 self.assertEqual(response.status_code, 302)
                 self.assertEqual(response.get('Location'), 'http://stuff.com/public/assertions/{}'.format(assertion.entity_id))
@@ -218,9 +219,11 @@ class PublicAPITests(SetupIssuerHelper, BadgrTestCase):
         post_input = {
             'url': 'http://a.com/instance'
         }
-        response = self.client.post(
-            '/v1/earner/badges', post_input
-        )
+        with mock.patch('mainsite.blacklist.api_query_is_in_blacklist',
+                        new=lambda a, b: False):
+            response = self.client.post(
+                '/v1/earner/badges', post_input
+            )
         self.assertEqual(response.status_code, 201)
         uploaded_badge = response.data
         assertion_entityid = uploaded_badge.get('id')
@@ -250,7 +253,7 @@ class PublicAPITests(SetupIssuerHelper, BadgrTestCase):
         response = self.client.get('/public/assertions/{}/image'.format(assertion.entity_id), follow=True)
         self.verify_baked_image_response(assertion, response, obi_version=UNVERSIONED_BAKED_VERSION)
 
-        for obi_version in OBI_VERSION_CONTEXT_IRIS.keys():
+        for obi_version in list(OBI_VERSION_CONTEXT_IRIS.keys()):
             response = self.client.get('/public/assertions/{assertion}/baked?v={version}'.format(
                 assertion=assertion.entity_id,
                 version=obi_version
@@ -296,14 +299,17 @@ class PendingAssertionsPublicAPITests(SetupIssuerHelper, BadgrTestCase):
         setup_resources([
             {'url': 'http://a.com/assertion-embedded1', 'filename': '2_0_assertion_embedded_badgeclass.json'},
             {'url': OPENBADGES_CONTEXT_V2_URI, 'response_body': json.dumps(OPENBADGES_CONTEXT_V2_DICT)},
-            {'url': 'http://a.com/badgeclass_image', 'filename': "unbaked_image.png"},
+            {'url': 'http://a.com/badgeclass_image', 'filename': "unbaked_image.png", 'mode': 'rb'},
         ])
         unverified_email = 'test@example.com'
         test_user = self.setup_user(email='verified@example.com', authenticate=True)
         CachedEmailAddress.objects.add_email(test_user, unverified_email)
         post_input = {"url": "http://a.com/assertion-embedded1"}
 
-        post_resp = self.client.post('/v2/backpack/import', post_input, format='json')
+        with mock.patch('mainsite.blacklist.api_query_is_in_blacklist',
+                        new=lambda a, b: False):
+            post_resp = self.client.post('/v2/backpack/import', post_input,
+                                         format='json')
         assertion = BadgeInstance.objects.first()
 
         self.client.logout()
@@ -329,11 +335,11 @@ class OEmbedTests(SetupIssuerHelper, BadgrTestCase):
         assertion = test_badgeclass.issue(recipient_id='new.recipient@email.test')
 
         # with self.assertNumQueries(0):
-        response = self.client.get('/public/oembed?format=json&url={}'.format(urllib.quote(assertion.jsonld_id)))
+        response = self.client.get('/public/oembed?format=json&url={}'.format(urllib.parse.quote(assertion.jsonld_id)))
         self.assertEqual(response.status_code, 200)
 
     def test_endpoint_handles_malformed_urls(self):
-        response = self.client.get('/public/oembed?format=json&url={}'.format(urllib.quote('ralph the dog')))
+        response = self.client.get('/public/oembed?format=json&url={}'.format(urllib.parse.quote('ralph the dog')))
         self.assertEqual(response.status_code, 404)
 
     def test_auto_discovery_of_api_endpoint(self):

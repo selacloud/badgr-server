@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 from apispec_drf.decorators import apispec_list_operation
 from rest_framework.exceptions import ValidationError
@@ -21,7 +21,7 @@ class ExternalToolList(BaseEntityListView):
 
     def get_objects(self, request, **kwargs):
         tools = list(ExternalTool.cached.global_tools())
-        if self.request.user.is_authenticated():
+        if self.request.user.is_authenticated:
             tools.extend(request.user.cached_externaltools())
         return tools
 

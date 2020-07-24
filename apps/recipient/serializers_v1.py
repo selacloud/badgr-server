@@ -1,7 +1,7 @@
 # Created by wiggins@concentricsky.com on 3/31/16.
 from collections import OrderedDict
 
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -18,7 +18,7 @@ class RecipientProfileSerializerV1(serializers.Serializer):
     def to_representation(self, instance):
         representation = super(RecipientProfileSerializerV1, self).to_representation(instance)
         representation.update([
-            ('@id', u"mailto:{}".format(instance.recipient_identifier)),
+            ('@id', "mailto:{}".format(instance.recipient_identifier)),
             ('@type', "RecipientProfile"),
             ('slug', instance.entity_id),
             ('name', instance.display_name),

@@ -52,7 +52,7 @@ class StaffUserProfileSerializerV2(DetailSerializerV2):
 class IssuerStaffSerializerV2(DetailSerializerV2):
     userProfile = StaffUserProfileSerializerV2(source='cached_user', read_only=True)
     user = EntityRelatedFieldV2(source='cached_user', queryset=BadgeUser.cached)
-    role = serializers.CharField(validators=[ChoicesValidator(dict(IssuerStaff.ROLE_CHOICES).keys())])
+    role = serializers.CharField(validators=[ChoicesValidator(list(dict(IssuerStaff.ROLE_CHOICES).keys()))])
 
     class Meta(DetailSerializerV2.Meta):
         apispec_definition = ('IssuerStaff', {
@@ -89,52 +89,62 @@ class IssuerSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
                     'type': "string",
                     'format': "string",
                     'description': "Unique identifier for this Issuer",
+                    'readOnly': True,
                 }),
                 ('entityType', {
                     'type': "string",
                     'format': "string",
                     'description': "\"Issuer\"",
+                    'readOnly': True,
                 }),
                 ('openBadgeId', {
                     'type': "string",
                     'format': "url",
                     'description': "URL of the OpenBadge compliant json",
+                    'readOnly': True,
                 }),
                 ('createdAt', {
                     'type': 'string',
                     'format': 'ISO8601 timestamp',
                     'description': "Timestamp when the Issuer was created",
+                    'readOnly': True,
                 }),
                 ('createdBy', {
                     'type': 'string',
                     'format': 'entityId',
                     'description': "BadgeUser who created this Issuer",
+                    'required': False,
                 }),
 
                 ('name', {
                     'type': "string",
                     'format': "string",
                     'description': "Name of the Issuer",
+                    'required': True,
                 }),
                 ('image', {
                     'type': "string",
                     'format': "data:image/png;base64",
                     'description': "Base64 encoded string of an image that represents the Issuer",
+                    'required': False,
                 }),
                 ('email', {
                     'type': "string",
                     'format': "email",
                     'description': "Contact email for the Issuer",
+                    'required': True,
                 }),
                 ('url', {
                     'type': "string",
                     'format': "url",
                     'description': "Homepage or website associated with the Issuer",
+                    'required': False,
                 }),
                 ('description', {
                     'type': "string",
                     'format': "text",
                     'description': "Short description of the Issuer",
+                    'required': False,
                 }),
 
             ])
@@ -146,15 +156,15 @@ class IssuerSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
             image.name = 'issuer_logo_' + str(uuid.uuid4()) + img_ext
         return image
 
-    def validate_badgrDomain(self, val):
-        if not request_authenticated_with_server_admin_token(self.context.get('request')):
-            return None
-        return val
-
     def validate_createdBy(self, val):
         if not request_authenticated_with_server_admin_token(self.context.get('request')):
             return None
         return val
+
+    def validate(self, data):
+        if data.get('badgrapp') and not request_authenticated_with_server_admin_token(self.context.get('request')):
+            data.pop('badgrapp')
+        return data
 
     def create(self, validated_data):
         request = self.context.get('request')
@@ -183,6 +193,9 @@ class IssuerSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
 
     def update(self, instance, validated_data):
         validated_data.pop('cached_creator', None)
+
+        if 'image' in validated_data:
+            self.context['save_kwargs'] = dict(force_resize=True)
 
         return super(IssuerSerializerV2, self).update(instance, validated_data)
 
@@ -241,58 +254,69 @@ class BadgeClassSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
                     'type': "string",
                     'format': "string",
                     'description': "Unique identifier for this BadgeClass",
+                    'readOnly': True,
                 }),
                 ('entityType', {
                     'type': "string",
                     'format': "string",
                     'description': "\"BadgeClass\"",
+                    'readOnly': True,
                 }),
                 ('openBadgeId', {
                     'type': "string",
                     'format': "url",
                     'description': "URL of the OpenBadge compliant json",
+                    'readOnly': True,
                 }),
                 ('createdAt', {
                     'type': 'string',
                     'format': 'ISO8601 timestamp',
                     'description': "Timestamp when the BadgeClass was created",
+                    'readOnly': True,
                 }),
                 ('createdBy', {
                     'type': 'string',
                     'format': 'entityId',
                     'description': "BadgeUser who created this BadgeClass",
+                    'readOnly': True,
                 }),
 
                 ('issuer', {
                     'type': 'string',
                     'format': 'entityId',
                     'description': "entityId of the Issuer who owns the BadgeClass",
+                    'required': False,
                 }),
 
                 ('name', {
                     'type': "string",
                     'format': "string",
                     'description': "Name of the BadgeClass",
+                    'required': True,
                 }),
                 ('description', {
                     'type': "string",
                     'format': "string",
                     'description': "Short description of the BadgeClass",
+                    'required': True,
                 }),
                 ('image', {
                     'type': "string",
                     'format': "data:image/png;base64",
                     'description': "Base64 encoded string of an image that represents the BadgeClass.",
+                    'required': False,
                 }),
                 ('criteriaUrl', {
                     'type': "string",
                     'format': "url",
-                    'description': "External URL that describes in a human-readable format the criteria for the BadgeClass"
+                    'description': "External URL that describes in a human-readable format the criteria for the BadgeClass",
+                    'required': False,
                 }),
                 ('criteriaNarrative', {
                     'type': "string",
                     'format': "markdown",
-                    'description': "Markdown formatted description of the criteria"
+                    'description': "Markdown formatted description of the criteria",
+                    'required': False,
                 }),
                 ('tags', {
                     'type': "array",
@@ -300,18 +324,21 @@ class BadgeClassSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
                         'type': "string",
                         'format': "string"
                     },
-                    'description': "List of tags that describe the BadgeClass"
+                    'description': "List of tags that describe the BadgeClass",
+                    'required': False,
                 }),
                 ('alignments', {
                     'type': "array",
                     'items': {
                         '$ref': '#/definitions/BadgeClassAlignment'
                     },
-                    'description': "List of objects describing objectives or educational standards"
+                    'description': "List of objects describing objectives or educational standards",
+                    'required': False,
                 }),
                 ('expires', {
                     '$ref': "#/definitions/BadgeClassExpiration",
-                    'description': "Expiration period for Assertions awarded from this BadgeClass"
+                    'description': "Expiration period for Assertions awarded from this BadgeClass",
+                    'required': False,
                 }),
             ])
         })
@@ -326,6 +353,9 @@ class BadgeClassSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin):
     def update(self, instance, validated_data):
         if 'cached_issuer' in validated_data:
             validated_data.pop('cached_issuer')  # issuer is not updatable
+
+        if 'image' in validated_data:
+            self.context['save_kwargs'] = dict(force_resize=True)
 
         if not IsEditor().has_object_permission(self.context.get('request'), None, instance.issuer):
             raise serializers.ValidationError(
@@ -377,6 +407,30 @@ class BadgeRecipientSerializerV2(BaseSerializerV2):
 
     }
 
+    class Meta:
+        apispec_definition = ('BadgeRecipient', {
+            'properties': OrderedDict([
+                ('identity', {
+                    'type': 'string',
+                    'format': 'string',
+                    'description': 'Either the hash of the identity or the plaintext value'
+                }),
+                ('type', {
+                    'type': 'string',
+                    'enum': [c[0] for c in BadgeInstance.RECIPIENT_TYPE_CHOICES],
+                    'description': "Type of identifier used to identify recipient"
+                }),
+                ('hashed', {
+                    'type': 'boolean',
+                    'description': "Whether or not the identity value is hashed."
+                }),
+                ('plaintextIdentity', {
+                    'type': 'string',
+                    'description': "The plaintext identity"
+                }),
+            ]),
+        })
+
     def validate(self, attrs):
         recipient_type = attrs.get('recipient_type')
         recipient_identifier = attrs.get('recipient_identifier')
@@ -394,7 +448,7 @@ class BadgeRecipientSerializerV2(BaseSerializerV2):
         representation = super(BadgeRecipientSerializerV2, self).to_representation(instance)
         if instance.hashed:
             representation['salt'] = instance.salt
-            representation['identity'] = generate_sha256_hashstring(instance.recipient_identifier.lower(), instance.salt)
+            representation['identity'] = generate_sha256_hashstring(instance.recipient_identifier, instance.salt)
 
         return representation
 
@@ -465,106 +519,104 @@ class BadgeInstanceSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin)
                     'type': "string",
                     'format': "string",
                     'description': "Unique identifier for this Assertion",
+                    'readOnly': True,
                 }),
                 ('entityType', {
                     'type': "string",
                     'format': "string",
                     'description': "\"Assertion\"",
+                    'readOnly': True,
                 }),
                 ('openBadgeId', {
                     'type': "string",
                     'format': "url",
                     'description': "URL of the OpenBadge compliant json",
+                    'readOnly': True,
                 }),
                 ('createdAt', {
                     'type': 'string',
                     'format': 'ISO8601 timestamp',
                     'description': "Timestamp when the Assertion was created",
+                    'readOnly': True,
                 }),
                 ('createdBy', {
                     'type': 'string',
                     'format': 'entityId',
                     'description': "BadgeUser who created the Assertion",
+                    'readOnly': True,
                 }),
 
                 ('badgeclass', {
                     'type': 'string',
                     'format': 'entityId',
                     'description': "BadgeClass that issued this Assertion",
+                    'required': False,
                 }),
                 ('badgeclassOpenBadgeId', {
                     'type': 'string',
                     'format': 'url',
                     'description': "URL of the BadgeClass to award",
+                    'required': False,
                 }),
                 ('badgeclassName', {
                     'type': 'string',
                     'format': 'string',
                     'description': "Name of BadgeClass to create assertion against, case insensitive",
+                    'required': False,
                 }),
                 ('revoked', {
                     'type': 'boolean',
                     'description': "True if this Assertion has been revoked",
+                    'readOnly': True,
                 }),
                 ('revocationReason', {
                     'type': 'string',
                     'format': "string",
                     'description': "Short description of why the Assertion was revoked",
+                    'readOnly': True,
                 }),
                 ('acceptance', {
                     'type': 'string',
                     'description': "Recipient interaction with Assertion. One of: Unaccepted, Accepted, or Rejected",
+                    'readOnly': True,
                 }),
                 ('image', {
                     'type': 'string',
                     'format': 'url',
                     'description': "URL to the baked assertion image",
+                    'readOnly': True,
                 }),
                 ('issuedOn', {
                     'type': 'string',
                     'format': 'ISO8601 timestamp',
                     'description': "Timestamp when the Assertion was issued",
+                    'required': False,
                 }),
                 ('narrative', {
                     'type': 'string',
                     'format': 'markdown',
                     'description': "Markdown narrative of the achievement",
+                    'required': False,
                 }),
                 ('evidence', {
                     'type': 'array',
                     'items': {
                         '$ref': '#/definitions/AssertionEvidence'
                     },
-                    'description': "List of evidence associated with the achievement"
+                    'description': "List of evidence associated with the achievement",
+                    'required': False,
                 }),
                 ('recipient', {
                     'type': 'object',
-                    'properties': OrderedDict([
-                        ('identity', {
-                            'type': 'string',
-                            'format': 'string',
-                            'description': 'Either the hash of the identity or the plaintext value'
-                        }),
-                        ('type', {
-                            'type': 'string',
-                            'enum': [c[0] for c in BadgeInstance.RECIPIENT_TYPE_CHOICES],
-                            'description': "Type of identifier used to identify recipient"
-                        }),
-                        ('hashed', {
-                            'type': 'boolean',
-                            'description': "Whether or not the identity value is hashed."
-                        }),
-                        ('plaintextIdentity', {
-                            'type': 'string',
-                            'description': "The plaintext identity"
-                        }),
-                    ]),
-                    'description': "Recipient that was issued the Assertion"
+                    '$ref': '#/definitions/BadgeRecipient',
+                    'description': "Recipient that was issued the Assertion",
+                    'required': False,
                 }),
                 ('expires', {
                     'type': 'string',
                     'format': 'ISO8601 timestamp',
                     'description': "Timestamp when the Assertion expires",
+                    'required': False,
                 }),
             ])
         })
@@ -598,6 +650,14 @@ class BadgeInstanceSerializerV2(DetailSerializerV2, OriginalJsonSerializerMixin)
     def validate(self, data):
         request = self.context.get('request', None)
         expected_issuer = self.context.get('kwargs', {}).get('issuer')
+        badgeclass_identifiers = ['badgeclass_jsonld_id', 'badgeclassName', 'cached_badgeclass', 'badgeclass']
+        badge_instance_properties = list(data.keys())
+
+        if 'badgeclass' in self.context:
+            badge_instance_properties.append('badgeclass')
+
+        if sum([el in badgeclass_identifiers for el in badge_instance_properties]) > 1:
+            raise serializers.ValidationError('Multiple badge class identifiers. Exactly one of the following badge class identifiers are allowed: badgeclass, badgeclassName, or badgeclassOpenBadgeId')
 
         if request and request.method != 'PUT':
             # recipient and badgeclass are only required on create, ignored on update

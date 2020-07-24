@@ -1,4 +1,4 @@
-import urllib
+import urllib.request, urllib.parse, urllib.error
 
 from django.http import HttpResponseRedirect
 from rest_framework.authentication import TokenAuthentication
@@ -32,7 +32,8 @@ def set_session_badgr_app(request, badgr_app):
 
 
 def get_session_authcode(request):
-    return request.session.get('badgr_authcode', None)
+    if request is not None:
+        return request.session.get('badgr_authcode', None)
 
 
 def set_session_authcode(request, authcode):
@@ -49,7 +50,7 @@ def redirect_to_frontend_error_toast(request, message):
     badgr_app = BadgrApp.objects.get_current(request)
     redirect_url = "{url}?authError={message}".format(
         url=badgr_app.ui_login_redirect,
-        message=urllib.quote(message))
+        message=urllib.parse.quote(message))
     return HttpResponseRedirect(redirect_to=redirect_url)
 
 

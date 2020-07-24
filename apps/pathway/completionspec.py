@@ -3,7 +3,7 @@ import json
 from collections import OrderedDict
 
 from django.conf import settings
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 
 from pathway.models import PathwayElement
 
@@ -172,7 +172,7 @@ class CompletionRequirementSpecFactory(object):
     @classmethod
     def parse_obj(cls, json_obj):
         completion_type = json_obj.get('@type')
-        if completion_type not in cls.COMPLETION_TYPES.keys():
+        if completion_type not in list(cls.COMPLETION_TYPES.keys()):
             raise ValueError("Invalid @type: {}".format(completion_type))
 
         junction_conf = json_obj.get('junctionConfig')

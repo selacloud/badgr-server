@@ -1,13 +1,14 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 import os
+import binascii
 from collections import OrderedDict
 
 import cachemodel
 from basic_models.models import CreatedUpdatedAt
 from django.conf import settings
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db import models, transaction
 from django.db.models import Q
 
@@ -77,7 +78,7 @@ class BackpackCollection(BaseAuditedModel, BaseVersionedEntity):
     @published.setter
     def published(self, value):
         if value and not self.share_hash:
-            self.share_hash = os.urandom(16).encode('hex')
+            self.share_hash = str(binascii.hexlify(os.urandom(16)), 'utf-8')
         elif not value and self.share_hash:
             self.publish_delete('share_hash')
             self.share_hash = ''
@@ -122,14 +123,14 @@ class BackpackCollection(BaseAuditedModel, BaseVersionedEntity):
                 except BadgeInstance.DoesNotExist:
                     pass
                 else:
-                    if badgeinstance.entity_id not in existing_badges.keys():
+                    if badgeinstance.entity_id not in list(existing_badges.keys()):
                         BackpackCollectionBadgeInstance.cached.get_or_create(
                             collection=self,
                             badgeinstance=badgeinstance
                         )
 
             # remove badges no longer in collection
-            for badge_entity_id, badgeinstance in existing_badges.items():
+            for badge_entity_id, badgeinstance in list(existing_badges.items()):
                 if not _is_in_requested_badges(badge_entity_id):
                     BackpackCollectionBadgeInstance.objects.filter(
                         collection=self,
@@ -167,9 +168,12 @@ class BackpackCollection(BaseAuditedModel, BaseVersionedEntity):
 
 
 class BackpackCollectionBadgeInstance(cachemodel.CacheModel):
-    collection = models.ForeignKey('backpack.BackpackCollection')
-    badgeuser = models.ForeignKey('badgeuser.BadgeUser', null=True, default=None)
-    badgeinstance = models.ForeignKey('issuer.BadgeInstance')
+    collection = models.ForeignKey('backpack.BackpackCollection',
+                                   on_delete=models.CASCADE)
+    badgeuser = models.ForeignKey('badgeuser.BadgeUser', null=True, default=None,
+                                  on_delete=models.CASCADE)
+    badgeinstance = models.ForeignKey('issuer.BadgeInstance',
+                                      on_delete=models.CASCADE)
 
     def publish(self):
         super(BackpackCollectionBadgeInstance, self).publish()
@@ -189,7 +193,7 @@ class BackpackCollectionBadgeInstance(cachemodel.CacheModel):
 
 
 class BaseSharedModel(cachemodel.CacheModel, CreatedUpdatedAt):
-    SHARE_PROVIDERS = [(p.provider_code, p.provider_name) for code,p in SharingManager.ManagerProviders.items()]
+    SHARE_PROVIDERS = [(p.provider_code, p.provider_name) for code,p in list(SharingManager.ManagerProviders.items())]
     provider = models.CharField(max_length=254, choices=SHARE_PROVIDERS)
     source = models.CharField(max_length=254, default="unknown")
 
@@ -201,14 +205,16 @@ class BaseSharedModel(cachemodel.CacheModel, CreatedUpdatedAt):
 
 
 class BackpackBadgeShare(BaseSharedModel):
-    badgeinstance = models.ForeignKey("issuer.BadgeInstance", null=True)
+    badgeinstance = models.ForeignKey("issuer.BadgeInstance", null=True,
+                                      on_delete=models.CASCADE)
 
     def get_share_url(self, provider, **kwargs):
         return SharingManager.share_url(provider, self.badgeinstance, **kwargs)
 
 
 class BackpackCollectionShare(BaseSharedModel):
-    collection = models.ForeignKey('backpack.BackpackCollection', null=False)
+    collection = models.ForeignKey('backpack.BackpackCollection', null=False,
+                                   on_delete=models.CASCADE)
 
     def get_share_url(self, provider, **kwargs):
         return SharingManager.share_url(provider, self.collection, **kwargs)

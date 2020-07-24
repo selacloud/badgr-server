@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 import uuid
 from collections import MutableMapping
@@ -178,7 +178,7 @@ class BadgeCheckHelper(object):
         return getattr(settings, 'BADGECHECK_OPTIONS', {
             'include_original_json': True,
             'use_cache': True,
-            # 'cache_backend': cls.cache_instance()  #  just use locmem cache for now 
+            # 'cache_backend': cls.cache_instance()  #  just use locmem cache for now
         })
 
     @classmethod
@@ -186,11 +186,11 @@ class BadgeCheckHelper(object):
 
         # distill 3 optional arguments into one query argument
         query = (url, imagefile, assertion)
-        query = filter(lambda v: v is not None, query)
+        query = [v for v in query if v is not None]
         if len(query) != 1:
             raise ValueError("Must provide only 1 of: url, imagefile or assertion_obo")
         query = query[0]
-        
+
         if created_by:
             emails = [d.email for d in created_by.email_items.all()]
             badgecheck_recipient_profile = {
@@ -238,12 +238,16 @@ class BadgeCheckHelper(object):
         original_json = response.get('input').get('original_json', {})
 
         recipient_profile = report.get('recipientProfile', {})
-        recipient_type, recipient_identifier = recipient_profile.items()[0]
+        recipient_type, recipient_identifier = list(recipient_profile.items())[0]
+
+        issuer_image = Issuer.objects.image_from_ob2(issuer_obo)
+        badgeclass_image = BadgeClass.objects.image_from_ob2(badgeclass_obo)
+        badgeinstance_image = BadgeInstance.objects.image_from_ob2(badgeclass_image, assertion_obo)
 
         def commit_new_badge():
             with transaction.atomic():
-                issuer, issuer_created = Issuer.objects.get_or_create_from_ob2(issuer_obo, original_json=original_json.get(issuer_obo.get('id')))
-                badgeclass, badgeclass_created = BadgeClass.objects.get_or_create_from_ob2(issuer, badgeclass_obo, original_json=original_json.get(badgeclass_obo.get('id')))
+                issuer, issuer_created = Issuer.objects.get_or_create_from_ob2(issuer_obo, original_json=original_json.get(issuer_obo.get('id')), image=issuer_image)
+                badgeclass, badgeclass_created = BadgeClass.objects.get_or_create_from_ob2(issuer, badgeclass_obo, original_json=original_json.get(badgeclass_obo.get('id')), image=badgeclass_image)
                 if badgeclass_created and (
                         getattr(settings, 'BADGERANK_NOTIFY_ON_BADGECLASS_CREATE', True) or
                         getattr(settings, 'BADGERANK_NOTIFY_ON_FIRST_ASSERTION', True)
@@ -253,7 +257,7 @@ class BadgeCheckHelper(object):
                 return BadgeInstance.objects.get_or_create_from_ob2(
                     badgeclass, assertion_obo,
                     recipient_identifier=recipient_identifier, recipient_type=recipient_type,
-                    original_json=original_json.get(assertion_obo.get('id'))
+                    original_json=original_json.get(assertion_obo.get('id')), image=badgeinstance_image
                 )
         try:
             return commit_new_badge()

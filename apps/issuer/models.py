@@ -1,8 +1,8 @@
-from __future__ import unicode_literals
 
-import StringIO
+
+import io
 import datetime
-import urllib
+import urllib.request, urllib.parse, urllib.error
 
 import dateutil
 import re
@@ -19,7 +19,7 @@ from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
 from django.core.files.base import ContentFile
 from django.core.files.storage import default_storage
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.db import models, transaction
 from django.db.models import ProtectedError
 from json import loads as json_loads
@@ -36,8 +36,8 @@ from mainsite.mixins import ResizeUploadedImage, ScrubUploadedSvgImage
 from mainsite.models import BadgrApp, EmailBlacklist
 from mainsite import blacklist
 from mainsite.utils import OriginSetting, generate_entity_uri
-from .utils import (add_obi_version_ifneeded, CURRENT_OBI_VERSION, generate_sha256_hashstring, get_obi_context,
-                    parse_original_datetime, UNVERSIONED_BAKED_VERSION)
+from .utils import (add_obi_version_ifneeded, CURRENT_OBI_VERSION, generate_rebaked_filename,
+                    generate_sha256_hashstring, get_obi_context, parse_original_datetime, UNVERSIONED_BAKED_VERSION)
 
 AUTH_USER_MODEL = getattr(settings, 'AUTH_USER_MODEL', 'auth.User')
 
@@ -51,9 +51,11 @@ logger = badgrlog.BadgrLogger()
 
 class BaseAuditedModel(cachemodel.CacheModel):
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
-    created_by = models.ForeignKey('badgeuser.BadgeUser', blank=True, null=True, related_name="+")
+    created_by = models.ForeignKey('badgeuser.BadgeUser', blank=True, null=True, related_name="+",
+                                   on_delete=models.CASCADE)
     updated_at = models.DateTimeField(auto_now=True, db_index=True)
-    updated_by = models.ForeignKey('badgeuser.BadgeUser', blank=True, null=True, related_name="+")
+    updated_by = models.ForeignKey('badgeuser.BadgeUser', blank=True, null=True, related_name="+",
+                                   on_delete=models.CASCADE)
 
     class Meta:
         abstract = True
@@ -80,7 +82,7 @@ class OriginalJsonMixin(models.Model):
     def get_filtered_json(self, excluded_fields=()):
         original = self.get_original_json()
         if original is not None:
-            return {key: original[key] for key in filter(lambda k: k not in excluded_fields, original.keys())}
+            return {key: original[key] for key in [k for k in list(original.keys()) if k not in excluded_fields]}
 
 
 class BaseOpenBadgeObjectModel(OriginalJsonMixin, cachemodel.CacheModel):
@@ -92,6 +94,9 @@ class BaseOpenBadgeObjectModel(OriginalJsonMixin, cachemodel.CacheModel):
 
     def get_extensions_manager(self):
         raise NotImplementedError()
+
+    def __hash__(self):
+        return hash((self.source, self.source_url))
 
     def __eq__(self, other):
         UNUSABLE_DEFAULT = uuid.uuid4()
@@ -124,7 +129,7 @@ class BaseOpenBadgeObjectModel(OriginalJsonMixin, cachemodel.CacheModel):
                 self.save()
 
             # add new
-            for ext_name, ext in value.items():
+            for ext_name, ext in list(value.items()):
                 ext_json = json_dumps(ext)
                 ext, ext_created = self.get_extensions_manager().get_or_create(name=ext_name, defaults=dict(
                     original_json=ext_json
@@ -144,7 +149,7 @@ class BaseOpenBadgeExtension(cachemodel.CacheModel):
     name = models.CharField(max_length=254)
     original_json = models.TextField(blank=True, null=True, default=None)
 
-    def __unicode__(self):
+    def __str__(self):
         return self.name
 
     class Meta:
@@ -179,10 +184,15 @@ class Issuer(ResizeUploadedImage,
     cached = SlugOrJsonIdCacheModelManager(slug_kwarg_name='entity_id', slug_field_name='entity_id')
 
     def publish(self, publish_staff=True, *args, **kwargs):
+        fields_cache = self._state.fields_cache  # stash the fields cache to avoid publishing related objects here
+        self._state.fields_cache = dict()
+
         super(Issuer, self).publish(*args, **kwargs)
         if publish_staff:
             for member in self.cached_issuerstaff():
                 member.cached_user.publish()
+
+        self._state.fields_cache = fields_cache  # restore the fields cache
 
     def delete(self, *args, **kwargs):
         if self.recipient_count > 0:
@@ -344,7 +354,7 @@ class Issuer(ResizeUploadedImage,
         if include_extra:
             extra = self.get_filtered_json()
             if extra is not None:
-                for k,v in extra.items():
+                for k,v in list(extra.items()):
                     if k not in json:
                         json[k] = v
 
@@ -373,8 +383,10 @@ class IssuerStaff(cachemodel.CacheModel):
         (ROLE_EDITOR, 'Editor'),
         (ROLE_STAFF, 'Staff'),
     )
-    issuer = models.ForeignKey(Issuer)
-    user = models.ForeignKey(AUTH_USER_MODEL)
+    issuer = models.ForeignKey(Issuer,
+                               on_delete=models.CASCADE)
+    user = models.ForeignKey(AUTH_USER_MODEL,
+                             on_delete=models.CASCADE)
     role = models.CharField(max_length=254, choices=ROLE_CHOICES, default=ROLE_STAFF)
 
     class Meta:
@@ -462,12 +474,14 @@ class BadgeClass(ResizeUploadedImage,
         verbose_name_plural = "Badge classes"
 
     def publish(self):
-        if hasattr(self, '_issuer_cache'):
-            del self._issuer_cache
+        fields_cache = self._state.fields_cache  # stash the fields cache to avoid publishing related objects here
+        self._state.fields_cache = dict()
         super(BadgeClass, self).publish()
         self.issuer.publish(publish_staff=False)
         if self.created_by:
             self.created_by.publish()
+
+        self._state.fields_cache = fields_cache  # restore the fields cache
 
     def delete(self, *args, **kwargs):
         # if there are some assertions and some have not expired
@@ -676,7 +690,7 @@ class BadgeClass(ResizeUploadedImage,
         if include_extra:
             extra = self.get_filtered_json()
             if extra is not None:
-                for k,v in extra.items():
+                for k,v in list(extra.items()):
                     if k not in json:
                         json[k] = v
 
@@ -715,7 +729,8 @@ class BadgeInstance(BaseAuditedModel,
     issued_on = models.DateTimeField(blank=False, null=False, default=timezone.now)
 
     badgeclass = models.ForeignKey(BadgeClass, blank=False, null=False, on_delete=models.CASCADE, related_name='badgeinstances')
-    issuer = models.ForeignKey(Issuer, blank=False, null=False)
+    issuer = models.ForeignKey(Issuer, blank=False, null=False,
+                               on_delete=models.CASCADE)
     user = models.ForeignKey('badgeuser.BadgeUser', blank=True, null=True, on_delete=models.SET_NULL)
 
     RECIPIENT_TYPE_CHOICES = (
@@ -780,7 +795,7 @@ class BadgeInstance(BaseAuditedModel,
     def get_share_url(self, include_identifier=False):
         url = self.share_url
         if include_identifier:
-            url = '%s?identity__%s=%s' % (url, self.recipient_type, urllib.quote(self.recipient_identifier))
+            url = '%s?identity__%s=%s' % (url, self.recipient_type, urllib.parse.quote(self.recipient_identifier))
         return url
 
     @property
@@ -858,7 +873,7 @@ class BadgeInstance(BaseAuditedModel,
 
             if not self.image:
                 badgeclass_name, ext = os.path.splitext(self.badgeclass.image.file.name)
-                new_image = StringIO.StringIO()
+                new_image = io.BytesIO()
                 bake(image_file=self.cached_badgeclass.image.file,
                      assertion_json_string=json_dumps(self.get_json(obi_version=UNVERSIONED_BAKED_VERSION), indent=2),
                      output_file=new_image)
@@ -881,22 +896,24 @@ class BadgeInstance(BaseAuditedModel,
         super(BadgeInstance, self).save(*args, **kwargs)
 
     def rebake(self, obi_version=CURRENT_OBI_VERSION, save=True):
-        new_image = StringIO.StringIO()
+        new_image = io.BytesIO()
         bake(
             image_file=self.cached_badgeclass.image.file,
             assertion_json_string=json_dumps(self.get_json(obi_version=obi_version), indent=2),
             output_file=new_image
         )
-        new_name = default_storage.save(self.image.name, ContentFile(new_image.read()))
+
+        new_filename = generate_rebaked_filename(self.image.name)
+        new_name = default_storage.save(new_filename, ContentFile(new_image.read()))
+        default_storage.delete(self.image.name)
         self.image.name = new_name
         if save:
             self.save()
 
     def publish(self):
-        if hasattr(self, '_issuer_cache'):
-            del self._issuer_cache
-        if hasattr(self, '_badgeclass_cache'):
-            del self._badgeclass_cache
+        fields_cache = self._state.fields_cache  # stash the fields cache to avoid publishing related objects here
+        self._state.fields_cache = dict()
+
         super(BadgeInstance, self).publish()
         self.badgeclass.publish()
         if self.cached_recipient_profile:
@@ -909,6 +926,7 @@ class BadgeInstance(BaseAuditedModel,
             collection.publish()
 
         self.publish_by('entity_id', 'revoked')
+        self._state.fields_cache = fields_cache  # restore the stashed fields cache
 
     def delete(self, *args, **kwargs):
         badgeclass = self.badgeclass
@@ -964,8 +982,8 @@ class BadgeInstance(BaseAuditedModel,
             # Allow sending, as this email is not blacklisted.
             pass
         else:
+            logger.event(badgrlog.BlacklistEarnerNotNotifiedEvent(self))
             return
-            # TODO: Report email non-delivery somewhere.
 
         if badgr_app is None:
             badgr_app = self.cached_issuer.cached_badgrapp
@@ -1119,7 +1137,7 @@ class BadgeInstance(BaseAuditedModel,
             json['recipient'] = {
                 "hashed": True,
                 "type": self.recipient_type,
-                "identity": generate_sha256_hashstring(self.recipient_identifier.lower(), self.salt),
+                "identity": generate_sha256_hashstring(self.recipient_identifier, self.salt),
             }
             if self.salt:
                 json['recipient']['salt'] = self.salt
@@ -1139,7 +1157,7 @@ class BadgeInstance(BaseAuditedModel,
         if include_extra:
             extra = self.get_filtered_json()
             if extra is not None:
-                for k,v in extra.items():
+                for k,v in list(extra.items()):
                     if k not in json:
                         json[k] = v
 
@@ -1179,7 +1197,7 @@ class BadgeInstance(BaseAuditedModel,
     @evidence_items.setter
     def evidence_items(self, value):
         def _key(narrative, url):
-            return u'{}-{}'.format(narrative or '', url or '')
+            return '{}-{}'.format(narrative or '', url or '')
         existing_evidence_idx = {_key(e.narrative, e.evidence_url): e for e in self.evidence_items}
         new_evidence_idx = {_key(v.get('narrative', None), v.get('evidence_url', None)): v for v in value}
 
@@ -1225,7 +1243,7 @@ class BadgeInstance(BaseAuditedModel,
                 include_extra=True
             )
             badgeclass_name, ext = os.path.splitext(self.badgeclass.image.file.name)
-            new_image = StringIO.StringIO()
+            new_image = io.BytesIO()
             bake(image_file=self.cached_badgeclass.image.file,
                  assertion_json_string=json_dumps(json_to_bake, indent=2),
                  output_file=new_image)
@@ -1247,7 +1265,8 @@ def _baked_badge_instance_filename_generator(instance, filename):
 
 
 class BadgeInstanceBakedImage(cachemodel.CacheModel):
-    badgeinstance = models.ForeignKey('issuer.BadgeInstance')
+    badgeinstance = models.ForeignKey('issuer.BadgeInstance',
+                                      on_delete=models.CASCADE)
     obi_version = models.CharField(max_length=254)
     image = models.FileField(upload_to=_baked_badge_instance_filename_generator, blank=True)
 
@@ -1261,7 +1280,8 @@ class BadgeInstanceBakedImage(cachemodel.CacheModel):
 
 
 class BadgeInstanceEvidence(OriginalJsonMixin, cachemodel.CacheModel):
-    badgeinstance = models.ForeignKey('issuer.BadgeInstance')
+    badgeinstance = models.ForeignKey('issuer.BadgeInstance',
+                                      on_delete=models.CASCADE)
     evidence_url = models.CharField(max_length=2083, blank=True, null=True, default=None)
     narrative = models.TextField(blank=True, null=True, default=None)
 
@@ -1292,7 +1312,8 @@ class BadgeInstanceEvidence(OriginalJsonMixin, cachemodel.CacheModel):
 
 
 class BadgeClassAlignment(OriginalJsonMixin, cachemodel.CacheModel):
-    badgeclass = models.ForeignKey('issuer.BadgeClass')
+    badgeclass = models.ForeignKey('issuer.BadgeClass',
+                                   on_delete=models.CASCADE)
     target_name = models.TextField()
     target_url = models.CharField(max_length=2083)
     target_description = models.TextField(blank=True, null=True, default=None)
@@ -1326,10 +1347,11 @@ class BadgeClassAlignment(OriginalJsonMixin, cachemodel.CacheModel):
 
 
 class BadgeClassTag(cachemodel.CacheModel):
-    badgeclass = models.ForeignKey('issuer.BadgeClass')
+    badgeclass = models.ForeignKey('issuer.BadgeClass',
+                                   on_delete=models.CASCADE)
     name = models.CharField(max_length=254, db_index=True)
 
-    def __unicode__(self):
+    def __str__(self):
         return self.name
 
     def publish(self):
@@ -1342,7 +1364,8 @@ class BadgeClassTag(cachemodel.CacheModel):
 
 
 class IssuerExtension(BaseOpenBadgeExtension):
-    issuer = models.ForeignKey('issuer.Issuer')
+    issuer = models.ForeignKey('issuer.Issuer',
+                               on_delete=models.CASCADE)
 
     def publish(self):
         super(IssuerExtension, self).publish()
@@ -1354,7 +1377,8 @@ class IssuerExtension(BaseOpenBadgeExtension):
 
 
 class BadgeClassExtension(BaseOpenBadgeExtension):
-    badgeclass = models.ForeignKey('issuer.BadgeClass')
+    badgeclass = models.ForeignKey('issuer.BadgeClass',
+                                   on_delete=models.CASCADE)
 
     def publish(self):
         super(BadgeClassExtension, self).publish()
@@ -1366,7 +1390,8 @@ class BadgeClassExtension(BaseOpenBadgeExtension):
 
 
 class BadgeInstanceExtension(BaseOpenBadgeExtension):
-    badgeinstance = models.ForeignKey('issuer.BadgeInstance')
+    badgeinstance = models.ForeignKey('issuer.BadgeInstance',
+                                      on_delete=models.CASCADE)
 
     def publish(self):
         super(BadgeInstanceExtension, self).publish()

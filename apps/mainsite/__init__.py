@@ -1,9 +1,9 @@
-from __future__ import absolute_import
-
 import sys
 import os
 import semver
 
+
+default_app_config = 'mainsite.apps.BadgrConfig'
 
 __all__ = ['APPS_DIR', 'TOP_DIR', 'get_version']
 

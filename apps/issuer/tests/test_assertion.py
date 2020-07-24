@@ -1,5 +1,5 @@
 # encoding: utf-8
-from __future__ import unicode_literals
+
 
 import datetime
 import dateutil.parser
@@ -9,10 +9,10 @@ from openbadges_bakery import unbake
 import png
 import pytz
 import re
-from urllib import quote_plus
+from urllib.parse import quote_plus
 
 from django.core import mail
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.utils import timezone
 from django.test import override_settings
 from oauth2_provider.models import Application
@@ -61,7 +61,7 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
             per_page=per_page
         ))
         while more_pages_present:
-            self.assertEquals(response.status_code, 200)
+            self.assertEqual(response.status_code, 200)
 
             page = response.data
             expected_page_count = min(total_assertion_count-number_seen, per_page)
@@ -72,44 +72,35 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
             self.assertIsNotNone(link_header)
             links = _parse_link_header(link_header)
             if page_number != 0:
-                self.assertTrue('prev' in links.keys())
+                self.assertTrue('prev' in list(links.keys()))
 
             if number_seen < total_assertion_count:
-                self.assertTrue('next' in links.keys())
+                self.assertTrue('next' in list(links.keys()))
                 next_url = links.get('next')
                 response = self.client.get(next_url)
                 page_number += 1
             else:
                 more_pages_present = False
 
-    @skip("test does not pass when using FileStorage, but does when using S3BotoStorage, and behavior works as expected in server")
     def test_can_rebake_assertion(self):
         test_user = self.setup_user(authenticate=True)
         test_issuer = self.setup_issuer(owner=test_user)
         test_badgeclass = self.setup_badgeclass(issuer=test_issuer)
 
-        import issuer.utils
-
-        # issue badge that gets baked with 1_1, while current version is 2_0
-        issuer.utils.CURRENT_OBI_VERSION = '2_0'
-        issuer.utils.UNVERSIONED_BAKED_VERSION = '1_1'
         test_assertion = test_badgeclass.issue(recipient_id='test1@email.test')
-        v1_data = json.loads(str(unbake(test_assertion.image)))
+        data = str(unbake(test_assertion.image))
 
-        self.assertDictContainsSubset({
-            '@context': u'https://w3id.org/openbadges/v1'
-        }, v1_data)
+        self.assertIn('https://w3id.org/openbadges/v2', data)
 
         original_image_url = test_assertion.image_url()
         test_assertion.rebake()
-        self.assertEqual(original_image_url, test_assertion.image_url())
+        assertion = BadgeInstance.objects.get(entity_id=test_assertion.entity_id)
+        self.assertNotEqual(original_image_url, test_assertion.image_url(),
+                            "To ensure downstream caches don't have the old image saved, a new filename is used")
 
-        v2_datastr = unbake(test_assertion.image)
+        v2_datastr = unbake(assertion.image)
         self.assertTrue(v2_datastr)
-        v2_data = json.loads(v2_datastr)
-        self.assertDictContainsSubset({
-            '@context': u'https://w3id.org/openbadges/v2'
-        }, v2_data)
+        self.assertIn('https://w3id.org/openbadges/v2', v2_datastr)
 
     def test_put_rebakes_assertion(self):
         test_user = self.setup_user(authenticate=True)
@@ -623,9 +614,9 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
         badge_data_present = False
         reader = png.Reader(file=instance.image)
         for chunk in reader.chunks():
-            if chunk[0] == 'IDAT':
+            if chunk[0] == b'IDAT':
                 image_data_present = True
-            elif chunk[0] == 'iTXt' and chunk[1].startswith('openbadges\x00\x00\x00\x00\x00'):
+            elif chunk[0] == b'iTXt' and chunk[1].startswith(b'openbadges\x00\x00\x00\x00\x00'):
                 badge_data_present = True
 
         self.assertTrue(image_data_present and badge_data_present)
@@ -900,7 +891,7 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
     def test_issue_svg_badge(self):
         test_user = self.setup_user(authenticate=True)
         test_issuer = self.setup_issuer(owner=test_user)
-        with open(self.get_test_svg_image_path(), 'r') as svg_badge_image:
+        with open(self.get_test_svg_image_path(), 'rb') as svg_badge_image:
             response = self.client.post('/v1/issuer/issuers/{issuer}/badges'.format(
                 issuer=test_issuer.entity_id,
             ), {
@@ -1136,6 +1127,68 @@ class V2ApiAssertionTests(SetupIssuerHelper, BadgrTestCase):
         ), new_assertion_props, format='json')
         self.assertEqual(response.status_code, 201)
 
+    def test_v2_issue_uppercase_email(self):
+        test_user = self.setup_user(authenticate=True)
+        test_issuer = self.setup_issuer(owner=test_user)
+        test_badgeclass = self.setup_badgeclass(issuer=test_issuer)
+
+        new_assertion_props = {
+            'recipient': {
+                'identity': 'TEST3@example.com'
+            },
+            'badgeclassOpenBadgeId': test_badgeclass.jsonld_id
+        }
+        response = self.client.post('/v2/issuers/{issuer}/assertions'.format(
+            issuer=test_issuer.entity_id
+        ), new_assertion_props, format='json')
+        self.assertEqual(response.status_code, 201)
+        assertion_data = response.data['result'][0]
+        recipient_id = assertion_data['recipient']['plaintextIdentity']
+        self.assertEqual(
+            recipient_id, new_assertion_props['recipient']['identity'].lower(),
+            "Reported recipient ID is lowercase")
+        assertion_from_db = BadgeInstance.objects.get(entity_id=assertion_data['entityId'])
+        self.assertEqual(
+            assertion_from_db.recipient_identifier, new_assertion_props['recipient']['identity'].lower(),
+            "Stored recipient ID is lowercase")
+
+    def test_v2_issue_uppercase_url(self):
+        """
+        Unlike emails, URLs are presumed to be case sensitive as reported to us.
+        """
+        test_user = self.setup_user(authenticate=True)
+        test_issuer = self.setup_issuer(owner=test_user)
+        test_badgeclass = self.setup_badgeclass(issuer=test_issuer)
+
+        new_assertion_props = {
+            'recipient': {
+                'identity': 'https://eXaMpLe.CoM/UPPERCASEPATH',
+                'type': 'url'
+            },
+            'badgeclassOpenBadgeId': test_badgeclass.jsonld_id
+        }
+        response = self.client.post('/v2/issuers/{issuer}/assertions'.format(
+            issuer=test_issuer.entity_id
+        ), new_assertion_props, format='json')
+        self.assertEqual(response.status_code, 201)
+        assertion_data = response.data['result'][0]
+        recipient_id = assertion_data['recipient']['plaintextIdentity']
+        self.assertEqual(
+            recipient_id, 'https://example.com/UPPERCASEPATH',
+            "Reported recipient ID URL is not automatically lowercased")
+        assertion_from_db = BadgeInstance.objects.get(entity_id=assertion_data['entityId'])
+        self.assertEqual(
+            assertion_from_db.recipient_identifier, 'https://example.com/UPPERCASEPATH',
+            "Stored recipient ID is not automatically lowercased")
+
+        new_assertion_props['recipient']['identity'] = 'NOTAURL/NOTAVALIDONE/butlookslikeone?sorta=True'
+        response = self.client.post('/v2/issuers/{issuer}/assertions'.format(
+            issuer=test_issuer.entity_id
+        ), new_assertion_props, format='json')
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()['fieldErrors']['recipient']['non_field_errors'][0], 'Enter a valid URL.')
+        # TODO this might be nicer if it were just a fieldError for recipient.identity or just was a non_field_error:[str] to begin with
+
     def test_v2_issue_by_badgeclassOpenBadgeId_permissions(self):
         test_user = self.setup_user(authenticate=True)
         test_issuer = self.setup_issuer(owner=test_user)
@@ -1230,7 +1283,7 @@ class AssertionsChangedApplicationTests(SetupOAuth2ApplicationHelper, SetupIssue
         response = self.client.post('/o/token', data=dict(
             grant_type=application.authorization_grant_type.replace('-','_'),
             client_id=application.client_id,
-            scope="rw:issuer r:assertions",
+            scope="rw:issuer",
             username=issuer_user.email,
             password='secret'
         ))
@@ -1240,7 +1293,7 @@ class AssertionsChangedApplicationTests(SetupOAuth2ApplicationHelper, SetupIssue
         response = self.client.post('/o/token', data=dict(
             grant_type=application.authorization_grant_type.replace('-', '_'),
             client_id=application.client_id,
-            scope="r:assertions",
+            scope="rw:issuer",
             username=application_user.email,
             password='secret'
         ))
@@ -1449,9 +1502,9 @@ class AllowDuplicatesAPITests(SetupIssuerHelper, BadgrTestCase):
         assertion = test_badgeclass.issue(
             'test3@example.com', expires_at=timezone.now() - timezone.timedelta(days=1)
         )
-        _ = assertion.badgeclass
-        self.assertTrue(hasattr(assertion, '_badgeclass_cache'))
+        _ = assertion.badgeclass  # call the foreign key attribute to ensure the related object is cached
+        self.assertIsNotNone(assertion._state.fields_cache.get('badgeclass'))
 
         cached_assertion = BadgeInstance.cached.get(entity_id=assertion.entity_id)
-        self.assertFalse(hasattr(cached_assertion, '_badgeclass_cache'))
-        self.assertFalse(hasattr(cached_assertion, '_issuer_cache'))
+        self.assertIsNone(cached_assertion._state.fields_cache.get('badgeclass'))
+        self.assertIsNone(cached_assertion._state.fields_cache.get('issuer'))

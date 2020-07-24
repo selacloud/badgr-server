@@ -2,7 +2,7 @@ import datetime
 from collections import OrderedDict
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.core.urlresolvers import reverse
+from django.urls import reverse
 from django.utils.dateparse import parse_datetime, parse_date
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError as RestframeworkValidationError
@@ -313,7 +313,7 @@ class VerifierBadgeDateTimeField(BadgePotentiallyEmptyField, serializers.Field):
     }
 
     def to_internal_value(self, value):
-        if isinstance(value, (str, unicode)):
+        if isinstance(value, str):
             try:
                 return datetime.datetime.utcfromtimestamp(float(value))
             except ValueError:
@@ -337,7 +337,7 @@ class VerifierBadgeDateTimeField(BadgePotentiallyEmptyField, serializers.Field):
             self.fail('not_int_or_str')
 
     def to_representation(self, string_value):
-        if isinstance(string_value, (str, unicode, int, float)):
+        if isinstance(string_value, (str, int, float)):
             value = self.to_internal_value(string_value)
         else:
             value = string_value

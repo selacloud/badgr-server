@@ -2,7 +2,7 @@
 from collections import OrderedDict
 
 from django.conf import settings
-from django.core.urlresolvers import reverse, resolve, Resolver404
+from django.urls import reverse, resolve, Resolver404
 from rest_framework import serializers
 from rest_framework.exceptions import ValidationError
 
@@ -184,7 +184,7 @@ class PathwayElementSerializer(LinkedDataEntitySerializer):
             try:
                 completion_requirements = CompletionRequirementSpecFactory.parse(requirement_string).serialize()
             except ValueError as e:
-                raise ValidationError("Invalid completion spec: {}".format(e.message))
+                raise ValidationError("Invalid completion spec: {}".format(str(e)))
 
         element = PathwayElement(pathway=pathway,
                                  parent_element=parent_element,
@@ -276,7 +276,7 @@ class RecipientCompletionSerializer(serializers.Serializer):
                     'slug': node['element'].slug
                 }
             if 'children' in node:
-                for child in node['children'].values():
+                for child in list(node['children'].values()):
                     _walk(child)
         for completion in instance['completions']:
             _walk(completion)

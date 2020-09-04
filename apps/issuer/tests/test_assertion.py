@@ -6,7 +6,7 @@ from time import sleep
 
 import dateutil.parser
 import json
-from unittest import skip
+from mock import patch
 from openbadges_bakery import unbake
 import png
 import pytz
@@ -20,7 +20,7 @@ from django.test import override_settings
 from oauth2_provider.models import Application
 
 from badgeuser.models import CachedEmailAddress, UserRecipientIdentifier
-from issuer.models import BadgeInstance, IssuerStaff, Issuer
+from issuer.models import BadgeInstance, EmailBlacklist, IssuerStaff, Issuer
 from issuer.utils import parse_original_datetime
 from mainsite.tests import BadgrTestCase, SetupIssuerHelper, SetupOAuth2ApplicationHelper
 from mainsite.utils import OriginSetting
@@ -182,7 +182,7 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
             sleep(2)
             updated_assertion_v2 = BadgeInstance.objects.get(entity_id=test_assertion_v2.entity_id)
             self.assertNotEqual(updated_assertion_v2.image_url(), original_image_url_v2)
-            #test batching works in task
+            # test batching works in task
             updated_assertion_v2_2 = BadgeInstance.objects.get(entity_id=test_assertion_v2_2.entity_id)
             self.assertNotEqual(updated_assertion_v2_2.image_url(), original_image_url_v2_2)
 
@@ -221,6 +221,19 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
                 description="some description 2",
                 image=image
             ))
+        self.assertEqual(response.status_code, 200)
+        sleep(2)
+        updated_assertion_v2 = BadgeInstance.objects.get(entity_id=test_assertion_v2.entity_id)
+        self.assertEqual(updated_assertion_v2.image_url(), original_image_url_v2)
+
+        # v2 api
+        original_image_url_v2 = test_assertion_v2.image_url()
+        response = self.client.put('/v2/badgeclasses/{badge}'.format(
+            badge=test_assertion_v2.cached_badgeclass.entity_id
+        ), dict(
+            name="some name update 3",
+            description="some description 3"
+        ))
         self.assertEqual(response.status_code, 200)
         sleep(2)
         updated_assertion_v2 = BadgeInstance.objects.get(entity_id=test_assertion_v2.entity_id)
@@ -505,6 +518,38 @@ class AssertionTests(SetupIssuerHelper, BadgrTestCase):
             badge=test_badgeclass.entity_id
         ), assertion)
         self.assertEqual(response.status_code, 400)
+
+    def test_badge_recipient_notified_by_email_before_blacklisting_but_not_after(self):
+        # notify_earner tries: EmailBlacklist.objects.get(email=self.recipient_identifier)
+        # if a matching email is found an event is logged and the recipient is not sent an email
+        # If no matching email is found recipient is sent an email
+
+        test_user = self.setup_user(authenticate=True)
+        test_issuer = self.setup_issuer(owner=test_user)
+        test_badgeclass = self.setup_badgeclass(issuer=test_issuer)
+        user_email = 'test3@example.com'
+        new_assertion_props = {
+            'recipient': {'identity': user_email},
+            'badgeclassOpenBadgeId': test_badgeclass.jsonld_id,
+            'notify': True
+        }
+
+        response = self.client.post('/v2/issuers/{issuer}/assertions'.format(
+            issuer=test_issuer.entity_id
+        ), new_assertion_props, format='json')
+        self.assertEqual(response.status_code, 201)
+        instance = BadgeInstance.objects.get(entity_id=response.data['result'][0]['entityId'])
+
+        self.assertEqual(len(mail.outbox), 1)
+
+        # No matching email is found, no logging, recipient is sent an email
+        instance.notify_earner(self.badgr_app)
+        self.assertEqual(len(mail.outbox), 2)
+
+        # Matching email is found, an event is logged, recipient is not sent an email
+        EmailBlacklist(email=user_email).save()
+        instance.notify_earner(self.badgr_app)
+        self.assertEqual(len(mail.outbox), 2)
 
     def test_issue_badge_with_ob1_evidence(self):
         test_user = self.setup_user(authenticate=True)

@@ -7,7 +7,10 @@ Pillow==7.1.0
 python-dateutil==2.7.5
 
 # mysql database
-mysqlclient==1.4.6
+# mysqlclient==1.4.6
+
+# postgresql database
+psycopg2-binary>=2.8
 
 django-storages==1.9.1
 python-resize-image==1.1.19

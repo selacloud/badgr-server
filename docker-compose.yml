@@ -1,7 +1,8 @@
+
 # A dockerized badgr-server stack for development
 version: '3.3'
-services:
 
+services:
   # this container mirrors in the app code and runs the django dev server
   api:
     build:
@@ -19,6 +20,12 @@ services:
       - badgr
     ports:
       - "8000:8000"
+    environment:
+      - db_host=db
+      - db_name=postgres
+      - db_port=5432
+      - db_user=postgres
+      - db_password=postgres
 
   # this container runs memcached
   memcached:
@@ -28,24 +35,22 @@ services:
     networks:
       - badgr
 
-  # this container runs mysql (database)
+# this container runs the dockerized postgres db
   db:
-    image: mysql:5.6.39
+    restart: always
+    image: mdillon/postgis:latest
     volumes:
-      - badgr_server_dev_db:/var/lib/mysql:rw
-      - ./.docker/etc/init.sql:/docker-entrypoint-initdb.d/init.sql
-    environment:
-      - "MYSQL_PASSWORD=password"
-      - "MYSQL_HOST=db"
-      - "MYSQL_ROOT_PASSWORD=password"
-    expose:
-      - "3306"
+        - db:/var/lib/postgresql
+    ports:
+        - 5432:5432
     networks:
-      - badgr
+        - badgr
 
 networks:
   badgr:
     driver: bridge
+    
 
 volumes:
   badgr_server_dev_db:
+  db:

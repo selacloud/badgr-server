@@ -1,4 +1,4 @@
 {% load i18n %}
 {% autoescape off %}
-{% blocktrans %}Confirm Your Badgr Account{% endblocktrans %}
+{% blocktrans %}Confirm Your CMMC-AB Account{% endblocktrans %}
 {% endautoescape %}
